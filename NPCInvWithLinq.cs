@@ -40,6 +40,7 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
 {
     private readonly CachedValue<List<WindowSet>> _storedStashAndWindows;
     private readonly CachedValue<List<CustomItemData>> _rewardItems;
+    private readonly CachedValue<List<CustomItemData>> _ritualItems;
     private List<ItemFilter<CustomItemData>> _itemFilters;
     private PurchaseWindow _purchaseWindowHideout;
     private PurchaseWindow _purchaseWindow;
@@ -49,8 +50,8 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         Name = "NPC Inv With Linq";
         _storedStashAndWindows = new TimeCache<List<WindowSet>>(CacheUtils.RememberLastValue<List<WindowSet>>(UpdateCurrentTradeWindow), 50);
         _rewardItems = new TimeCache<List<CustomItemData>>(GetRewardItems, 1000);
+        _ritualItems = new TimeCache<List<CustomItemData>>(GetRitualItems, 1000);
     }
-
     public override bool Initialise()
     {
         Settings.ReloadFilters.OnPressed = LoadRuleFiles;
@@ -72,6 +73,7 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         PerformItemFilterTest(hoveredItem);
         ProcessPurchaseWindow(hoveredItem);
         ProcessRewardsWindow(hoveredItem);
+        ProcessRitualWindow(hoveredItem);
     }
 
     private void ProcessRewardsWindow(Element hoveredItem)
@@ -87,6 +89,19 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
             Graphics.DrawFrame(reward.ClientRectangle, frameColor, Settings.FrameThickness);
         }
     }
+    private void ProcessRitualWindow(Element hoveredItem)
+    {
+        if (!GameController.IngameState.IngameUi.RitualWindow.IsVisible) return;
+
+        foreach (var reward in _ritualItems?.Value.Where(x => _itemFilters.Any(y => y.Matches(x))) ?? Enumerable.Empty<CustomItemData>())
+        {
+            var frameColor = hoveredItem != null && hoveredItem.Tooltip.GetClientRectCache.Intersects(reward.ClientRectangle) && hoveredItem.Entity.Address != reward.Entity.Address
+                ? (ColorNode)(Settings.FrameColor.Value with { A = 45 })
+                : Settings.FrameColor;
+
+            Graphics.DrawFrame(reward.ClientRectangle, frameColor, Settings.FrameThickness);
+        }
+    }
 
     private List<CustomItemData> GetRewardItems() =>
         GameController.IngameState.IngameUi.QuestRewardWindow.GetPossibleRewards()
@@ -94,12 +109,17 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
             .Select(item => new CustomItemData(item.Item1, GameController, EKind.QuestReward, item.Item2.GetClientRectCache))
             .ToList();
 
+    private List<CustomItemData> GetRitualItems() =>
+    GameController.IngameState.IngameUi.RitualWindow.InventoryElement.VisibleInventoryItems
+        .Where(item => item.Item is { Address: not 0, IsValid: true })
+        .Select(item => new CustomItemData(item.Item, GameController, EKind.RitualReward, item.GetClientRectCache))
+        .ToList();
     private void ProcessPurchaseWindow(Element hoveredItem)
     {
         if (!IsPurchaseWindowVisible())
             return;
 
-        List<string> unSeenItems = new List<string>();
+        List<string> unSeenItems = [];
         ProcessStoredTabs(unSeenItems, hoveredItem);
 
         PurchaseWindow purchaseWindowItems = GetVisiblePurchaseWindow();

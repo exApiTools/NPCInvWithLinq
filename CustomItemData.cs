@@ -18,4 +18,5 @@ public enum EKind
 {
     QuestReward,
     Shop,
+    RitualReward
 }
