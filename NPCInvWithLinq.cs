@@ -292,8 +292,10 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         if (purchaseWindowItems == null)
             return [];
 
-        return purchaseWindowItems.TabContainer.AllInventories.Select((uiInventory, i) =>
+        return purchaseWindowItems.TabContainer.Inventories.Select((inventory, i) =>
         {
+            var uiInventory = inventory?.Inventory;
+            if (uiInventory == null) return null;
             var serverInventory = uiInventory.ServerInventory;
             if (serverInventory == null)
                 DebugWindow.LogError(
@@ -318,12 +320,11 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
                     .ToList(),
                 Title = title,
                 IsVisible = isVisible,
-                TabNameElement = purchaseWindowItems.TabContainer.TabSwitchBar.Children
-                    .FirstOrDefault(x => x?.GetChildAtIndex(0)?.GetChildAtIndex(1)?.Text == title)
+                TabNameElement = inventory.TabButton
             };
 
             return newTab;
-        }).ToList();
+        }).Where(x => x != null).ToList();
     }
 
     private bool ItemInFilter(CustomItemData item)
