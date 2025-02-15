@@ -1,17 +1,17 @@
-﻿using ExileCore;
+﻿using System.Collections.Generic;
+using System.Linq;
+using ExileCore;
 using ExileCore.PoEMemory;
 using ExileCore.PoEMemory.Elements;
 using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Cache;
 using ExileCore.Shared.Helpers;
-using ItemFilterLibrary;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Numerics;
 using ExileCore.Shared.Nodes;
+using Ground_Items_With_Linq;
+using ItemFilterLibrary;
+using SharpDX;
 using static NPCInvWithLinq.ServerAndStashWindow;
+using Vector2 = System.Numerics.Vector2;
 
 namespace NPCInvWithLinq;
 
@@ -31,32 +31,42 @@ public class ServerAndStashWindow
 
         public override string ToString()
         {
-            return $"Tab({Title}) is Index({Index}) IsVisible({IsVisible}) [ServerItems({ServerItems.Count}), TradeWindowItems({TradeWindowItems.Count})]";
+            return
+                $"Tab({Title}) is Index({Index}) IsVisible({IsVisible}) [ServerItems({ServerItems.Count}), TradeWindowItems({TradeWindowItems.Count})]";
         }
     }
 }
 
 public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
 {
-    private readonly CachedValue<List<WindowSet>> _storedStashAndWindows;
+    public static NPCInvWithLinq Main;
     private readonly CachedValue<List<CustomItemData>> _rewardItems;
     private readonly CachedValue<List<CustomItemData>> _ritualItems;
-    private List<ItemFilter<CustomItemData>> _itemFilters;
-    private PurchaseWindow _purchaseWindowHideout;
+    private readonly CachedValue<List<WindowSet>> _storedStashAndWindows;
     private PurchaseWindow _purchaseWindow;
+    private PurchaseWindow _purchaseWindowHideout;
+    public List<ItemFilter<CustomItemData>> ItemFilters;
 
     public NPCInvWithLinq()
     {
         Name = "NPC Inv With Linq";
-        _storedStashAndWindows = new TimeCache<List<WindowSet>>(CacheUtils.RememberLastValue<List<WindowSet>>(UpdateCurrentTradeWindow), 50);
+        _storedStashAndWindows =
+            new TimeCache<List<WindowSet>>(CacheUtils.RememberLastValue<List<WindowSet>>(UpdateCurrentTradeWindow), 50);
         _rewardItems = new TimeCache<List<CustomItemData>>(GetRewardItems, 1000);
         _ritualItems = new TimeCache<List<CustomItemData>>(GetRitualItems, 1000);
     }
+
     public override bool Initialise()
     {
-        Settings.ReloadFilters.OnPressed = LoadRuleFiles;
-        LoadRuleFiles();
+        Main = this;
+        RulesDisplay.LoadAndApplyRules();
         return true;
+    }
+
+    public override void DrawSettings()
+    {
+        base.DrawSettings();
+        RulesDisplay.DrawSettings();
     }
 
     public override Job Tick()
@@ -80,22 +90,29 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
     {
         if (!GameController.IngameState.IngameUi.QuestRewardWindow.IsVisible) return;
 
-        foreach (var reward in _rewardItems?.Value.Where(x => _itemFilters.Any(y => y.Matches(x))) ?? Enumerable.Empty<CustomItemData>())
+        foreach (var reward in _rewardItems?.Value.Where(x => ItemFilters.Any(y => y.Matches(x))) ??
+                               Enumerable.Empty<CustomItemData>())
         {
-            var frameColor = hoveredItem != null && hoveredItem.Tooltip.GetClientRectCache.Intersects(reward.ClientRectangle) && hoveredItem.Entity.Address != reward.Entity.Address
+            var frameColor = hoveredItem != null &&
+                             hoveredItem.Tooltip.GetClientRectCache.Intersects(reward.ClientRectangle) &&
+                             hoveredItem.Entity.Address != reward.Entity.Address
                 ? (ColorNode)(Settings.FrameColor.Value with { A = 45 })
                 : Settings.FrameColor;
 
             Graphics.DrawFrame(reward.ClientRectangle, frameColor, Settings.FrameThickness);
         }
     }
+
     private void ProcessRitualWindow(Element hoveredItem)
     {
         if (!GameController.IngameState.IngameUi.RitualWindow.IsVisible) return;
 
-        foreach (var reward in _ritualItems?.Value.Where(x => _itemFilters.Any(y => y.Matches(x))) ?? Enumerable.Empty<CustomItemData>())
+        foreach (var reward in _ritualItems?.Value.Where(x => ItemFilters.Any(y => y.Matches(x))) ??
+                               Enumerable.Empty<CustomItemData>())
         {
-            var frameColor = hoveredItem != null && hoveredItem.Tooltip.GetClientRectCache.Intersects(reward.ClientRectangle) && hoveredItem.Entity.Address != reward.Entity.Address
+            var frameColor = hoveredItem != null &&
+                             hoveredItem.Tooltip.GetClientRectCache.Intersects(reward.ClientRectangle) &&
+                             hoveredItem.Entity.Address != reward.Entity.Address
                 ? (ColorNode)(Settings.FrameColor.Value with { A = 45 })
                 : Settings.FrameColor;
 
@@ -103,17 +120,23 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         }
     }
 
-    private List<CustomItemData> GetRewardItems() =>
-        GameController.IngameState.IngameUi.QuestRewardWindow.GetPossibleRewards()
+    private List<CustomItemData> GetRewardItems()
+    {
+        return GameController.IngameState.IngameUi.QuestRewardWindow.GetPossibleRewards()
             .Where(item => item.Item2 is { Address: not 0, IsValid: true })
-            .Select(item => new CustomItemData(item.Item1, GameController, EKind.QuestReward, item.Item2.GetClientRectCache))
+            .Select(item =>
+                new CustomItemData(item.Item1, GameController, EKind.QuestReward, item.Item2.GetClientRectCache))
             .ToList();
+    }
 
-    private List<CustomItemData> GetRitualItems() =>
-    GameController.IngameState.IngameUi.RitualWindow.InventoryElement.VisibleInventoryItems
-        .Where(item => item.Item is { Address: not 0, IsValid: true })
-        .Select(item => new CustomItemData(item.Item, GameController, EKind.RitualReward, item.GetClientRectCache))
-        .ToList();
+    private List<CustomItemData> GetRitualItems()
+    {
+        return GameController.IngameState.IngameUi.RitualWindow.InventoryElement.VisibleInventoryItems
+            .Where(item => item.Item is { Address: not 0, IsValid: true })
+            .Select(item => new CustomItemData(item.Item, GameController, EKind.RitualReward, item.GetClientRectCache))
+            .ToList();
+    }
+
     private void ProcessPurchaseWindow(Element hoveredItem)
     {
         if (!IsPurchaseWindowVisible())
@@ -122,28 +145,29 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         List<string> unSeenItems = [];
         ProcessStoredTabs(unSeenItems, hoveredItem);
 
-        PurchaseWindow purchaseWindowItems = GetVisiblePurchaseWindow();
+        var purchaseWindowItems = GetVisiblePurchaseWindow();
         var serverItemsBox = CalculateServerItemsBox(unSeenItems, purchaseWindowItems);
 
         DrawServerItems(serverItemsBox, unSeenItems, hoveredItem);
     }
 
-    private void DrawServerItems(SharpDX.RectangleF serverItemsBox, List<string> unSeenItems, Element hoveredItem)
+    private void DrawServerItems(RectangleF serverItemsBox, List<string> unSeenItems, Element hoveredItem)
     {
         if (hoveredItem == null || !hoveredItem.Tooltip.GetClientRectCache.Intersects(serverItemsBox))
         {
-            var boxColor = new SharpDX.Color(0, 0, 0, 150);
-            var textColor = new SharpDX.Color(255, 255, 255, 230);
+            var boxColor = new Color(0, 0, 0, 150);
+            var textColor = new Color(255, 255, 255, 230);
 
             Graphics.DrawBox(serverItemsBox, boxColor);
 
-            for (int i = 0; i < unSeenItems.Count; i++)
+            for (var i = 0; i < unSeenItems.Count; i++)
             {
-                string stringItem = unSeenItems[i];
+                var stringItem = unSeenItems[i];
                 var textHeight = Graphics.MeasureText(stringItem);
                 var textPadding = 10;
 
-                Graphics.DrawText(stringItem, new Vector2(serverItemsBox.X + textPadding, serverItemsBox.Y + (textHeight.Y * i)), textColor);
+                Graphics.DrawText(stringItem,
+                    new Vector2(serverItemsBox.X + textPadding, serverItemsBox.Y + textHeight.Y * i), textColor);
             }
         }
     }
@@ -161,20 +185,16 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
     private void ProcessStoredTabs(List<string> unSeenItems, Element hoveredItem)
     {
         foreach (var storedTab in _storedStashAndWindows.Value)
-        {
             if (storedTab.IsVisible)
                 ProcessVisibleTabItems(storedTab.TradeWindowItems, hoveredItem);
             else
                 ProcessHiddenTabItems(storedTab, unSeenItems, hoveredItem);
-        }
     }
 
     private void ProcessVisibleTabItems(IEnumerable<CustomItemData> items, Element hoveredItem)
     {
         foreach (var visibleItem in items.Where(item => item != null && ItemInFilter(item)))
-        {
             DrawItemFrame(visibleItem, hoveredItem);
-        }
     }
 
     private void ProcessHiddenTabItems(WindowSet storedTab, List<string> unSeenItems, Element hoveredItem)
@@ -200,38 +220,31 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         if (!unSeenItems.Contains($"Tab [{storedTab.Title}]"))
         {
             unSeenItems.Add($"Tab [{storedTab.Title}]");
-            if (Settings.DrawOnTabLabels)
-            {
-                DrawTabNameElementFrame(storedTab.TabNameElement, hoveredItem);
-            }
+            if (Settings.DrawOnTabLabels) DrawTabNameElementFrame(storedTab.TabNameElement, hoveredItem);
         }
     }
 
     private void DrawItemFrame(CustomItemData item, Element hoveredItem)
     {
-        if (hoveredItem != null && hoveredItem.Tooltip.GetClientRectCache.Intersects(item.ClientRectangle) && hoveredItem.Entity.Address != item.Entity.Address)
-        {
-            Graphics.DrawFrame(item.ClientRectangle, Settings.FrameColor.Value with { A = 45 }, Settings.FrameThickness);
-        }
+        if (hoveredItem != null && hoveredItem.Tooltip.GetClientRectCache.Intersects(item.ClientRectangle) &&
+            hoveredItem.Entity.Address != item.Entity.Address)
+            Graphics.DrawFrame(item.ClientRectangle, Settings.FrameColor.Value with { A = 45 },
+                Settings.FrameThickness);
         else
-        {
             Graphics.DrawFrame(item.ClientRectangle, Settings.FrameColor, Settings.FrameThickness);
-        }
     }
 
     private void DrawTabNameElementFrame(Element tabNameElement, Element hoveredItem)
     {
-        if (hoveredItem == null || !hoveredItem.Tooltip.GetClientRectCache.Intersects(tabNameElement.GetClientRectCache))
-        {
+        if (hoveredItem == null ||
+            !hoveredItem.Tooltip.GetClientRectCache.Intersects(tabNameElement.GetClientRectCache))
             Graphics.DrawFrame(tabNameElement.GetClientRectCache, Settings.FrameColor, Settings.FrameThickness);
-        }
         else
-        {
-            Graphics.DrawFrame(tabNameElement.GetClientRectCache, Settings.FrameColor.Value with { A = 45 }, Settings.FrameThickness);
-        }
+            Graphics.DrawFrame(tabNameElement.GetClientRectCache, Settings.FrameColor.Value with { A = 45 },
+                Settings.FrameThickness);
     }
 
-    private SharpDX.RectangleF CalculateServerItemsBox(List<string> unSeenItems, PurchaseWindow purchaseWindowItems)
+    private RectangleF CalculateServerItemsBox(List<string> unSeenItems, PurchaseWindow purchaseWindowItems)
     {
         var startingPoint = purchaseWindowItems.TabContainer.GetClientRectCache.TopRight.ToVector2Num();
         startingPoint.X += 15;
@@ -240,10 +253,10 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         var textHeight = Graphics.MeasureText(longestText);
         var textPadding = 10;
 
-        return new SharpDX.RectangleF
+        return new RectangleF
         {
             Height = textHeight.Y * unSeenItems.Count,
-            Width = textHeight.X + (textPadding * 2),
+            Width = textHeight.X + textPadding * 2,
             X = startingPoint.X,
             Y = startingPoint.Y
         };
@@ -251,7 +264,8 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
 
     private PurchaseWindow GetVisiblePurchaseWindow()
     {
-        return _purchaseWindowHideout.IsVisible ? _purchaseWindowHideout : _purchaseWindow.IsVisible ? _purchaseWindow : null;
+        return _purchaseWindowHideout.IsVisible ? _purchaseWindowHideout :
+            _purchaseWindow.IsVisible ? _purchaseWindow : null;
     }
 
     private void PerformItemFilterTest(Element hoveredItem)
@@ -264,65 +278,15 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         }
     }
 
-    private void LoadRuleFiles()
-    {
-        var pickitConfigFileDirectory = ConfigDirectory;
-        var existingRules = Settings.NPCInvRules;
-
-        if (!string.IsNullOrEmpty(Settings.CustomConfigDir))
-        {
-            var customConfigFileDirectory = Path.Combine(Path.GetDirectoryName(ConfigDirectory), Settings.CustomConfigDir);
-
-            if (Directory.Exists(customConfigFileDirectory))
-            {
-                pickitConfigFileDirectory = customConfigFileDirectory;
-            }
-            else
-            {
-                DebugWindow.LogError("[NPC Inventory] custom config folder does not exist.", 15);
-            }
-        }
-
-        try
-        {
-            var newRules = new DirectoryInfo(pickitConfigFileDirectory).GetFiles("*.ifl")
-                .Select(x => new NPCInvRule(x.Name, Path.GetRelativePath(pickitConfigFileDirectory, x.FullName), false))
-                .ExceptBy(existingRules.Select(x => x.Location), x => x.Location)
-                .ToList();
-            foreach (var groundRule in existingRules)
-            {
-                var fullPath = Path.Combine(pickitConfigFileDirectory, groundRule.Location);
-                if (File.Exists(fullPath))
-                {
-                    newRules.Add(groundRule);
-                }
-                else
-                {
-                    LogError($"File '{groundRule.Name}' not found.");
-                }
-            }
-
-            _itemFilters = newRules
-                .Where(rule => rule.Enabled)
-                .Select(rule => ItemFilter.LoadFromPath<CustomItemData>(Path.Combine(pickitConfigFileDirectory, rule.Location)))
-                .ToList();
-
-            Settings.NPCInvRules = newRules;
-        }
-        catch (Exception e)
-        {
-            LogError($"An error occurred while loading rule files: {e.Message}");
-        }
-    }
-
     private List<WindowSet> UpdateCurrentTradeWindow(List<WindowSet> previousValue)
     {
-        var previousDict = previousValue?.ToDictionary(x => (x.Inventory.Address, x.Inventory.ServerRequestCounter, x.IsVisible, x.TradeWindowItems.Count));
+        var previousDict = previousValue?.ToDictionary(x =>
+            (x.Inventory.Address, x.Inventory.ServerRequestCounter, x.IsVisible, x.TradeWindowItems.Count));
         var purchaseWindowItems = (_purchaseWindowHideout, _purchaseWindow) switch
         {
             ({ IsVisible: true } w, _) => w,
             (_, { IsVisible: true } w) => w,
-            _ => null,
+            _ => null
         };
 
         if (purchaseWindowItems == null)
@@ -332,24 +296,23 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
         {
             var serverInventory = uiInventory.ServerInventory;
             if (serverInventory == null)
-            {
-                DebugWindow.LogError($"Server inventory for ui inventory {uiInventory} ({uiInventory.InvType}) is missing");
-            }
+                DebugWindow.LogError(
+                    $"Server inventory for ui inventory {uiInventory} ({uiInventory.InvType}) is missing");
 
             var isVisible = uiInventory.IsVisible;
             var visibleValidUiItems = uiInventory.VisibleInventoryItems
                 .Where(x => x.Item?.Path != null).ToList();
-            if (previousDict?.TryGetValue((serverInventory?.Address ?? 0, serverInventory?.ServerRequestCounter ?? -1, isVisible, visibleValidUiItems.Count), out var previousSet) == true)
-            {
-                return previousSet;
-            }
+            if (previousDict?.TryGetValue(
+                    (serverInventory?.Address ?? 0, serverInventory?.ServerRequestCounter ?? -1, isVisible,
+                        visibleValidUiItems.Count), out var previousSet) == true) return previousSet;
 
             var title = $"-{i + 1}-";
             var newTab = new WindowSet
             {
                 Inventory = serverInventory,
                 Index = i,
-                ServerItems = serverInventory?.Items.Where(x => x?.Path != null).Select(x => new CustomItemData(x, GameController, EKind.Shop)).ToList() ?? [],
+                ServerItems = serverInventory?.Items.Where(x => x?.Path != null)
+                    .Select(x => new CustomItemData(x, GameController, EKind.Shop)).ToList() ?? [],
                 TradeWindowItems = visibleValidUiItems
                     .Select(x => new CustomItemData(x.Item, GameController, EKind.Shop, x.GetClientRectCache))
                     .ToList(),
@@ -365,6 +328,6 @@ public class NPCInvWithLinq : BaseSettingsPlugin<NPCInvWithLinqSettings>
 
     private bool ItemInFilter(CustomItemData item)
     {
-        return _itemFilters?.Any(filter => filter.Matches(item)) ?? false;
+        return ItemFilters?.Any(filter => filter.Matches(item)) ?? false;
     }
 }
